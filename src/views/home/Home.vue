@@ -3,6 +3,13 @@
     <nav-bar class="home-nav">
       <div slot="center">购物街</div>
     </nav-bar>
+    <tab-control
+      :titles="['流行', '新款', '精选']"
+      @tabClick="tabClick"
+      ref="tabControl1"
+      class="tab-control"
+      v-show="isTabFixed"
+    />
     <scroll
       class="content"
       ref="scroll"
@@ -11,31 +18,49 @@
       :pull-up-load="true"
       @pullingUp="loadMore"
     >
-      <home-Swiper :banners="banners"></home-Swiper>
+      <home-Swiper :banners="banners" @swiperImageLoad="swiperImageLoad"></home-Swiper>
       <recommend-view :recommends="recommends"></recommend-view>
       <feature-view />
-      <tabControl class="tab-control" :titles="['流行','新款','精选']" @tabClick="tabClick"></tabControl>
-      <goods-list :goods="showGoods"></goods-list>
+      <tabControl
+        class="tab-control"
+        :titles="['流行','新款','精选']"
+        @tabClick="tabClick"
+        ref="tabControl2"
+      ></tabControl>
+      <good-list :goods="showGoods"></good-list>
     </scroll>
     <back-top @click.native="backClick" v-show="isShowBackTop" />
   </div>
 </template>
  
 <script>
-import NavBar from "components/common/navbar/NavBar";
-import { getHomeMultidata, getHomeGoods } from "network/home";
 import HomeSwiper from "./childComps/HomeSwiper";
 import RecommendView from "./childComps/RecommendView";
 import FeatureView from "./childComps/FeatureView";
-import GoodsList from "components/content/goods/GoodsList";
-import Scroll from "components/common/scroll/Scroll";
 
+import NavBar from "components/common/navbar/NavBar";
 import TabControl from "components/content/tabControl/TabControl";
+import GoodList from "components/content/goods/GoodsList";
+import Scroll from "components/common/scroll/Scroll";
 import BackTop from "components/content/backTop/BackTop";
+
+import { getHomeMultidata, getHomeGoods } from "network/home";
+import { debounce } from "common/utils";
+
 // import { Swiper, SwiperItem } from "components/common/swiper/index";
 
 export default {
   name: "Home",
+  components: {
+    HomeSwiper,
+    RecommendView,
+    FeatureView,
+    NavBar,
+    TabControl,
+    GoodList,
+    Scroll,
+    BackTop,
+  },
   data() {
     return {
       banners: [],
@@ -57,26 +82,36 @@ export default {
       return this.goods[this.currentType].list;
     },
   },
-  components: {
-    NavBar,
-    HomeSwiper,
-    RecommendView,
-    FeatureView,
-    GoodsList,
-    Scroll,
-    BackTop,
-    TabControl,
+  destroyed() {
+    console.log("home destroyed");
   },
-  //组件创建成功后，请求数据
+  activated() {
+    this.$refs.scroll.scrollTo(0, this.saveY, 0);
+    this.$refs.scroll.refresh();
+  },
+  deactivated() {
+    this.saveY = this.$refs.scroll.getScrollY();
+  },
   created() {
-    //初始化请求多个数据
+    // 1.请求多个数据
     this.getHomeMultidata();
+
+    // 2.请求商品数据
     this.getHomeGoods("pop");
     this.getHomeGoods("new");
     this.getHomeGoods("sell");
   },
+  mounted() {
+    // 1.图片加载完成的事件监听
+    const refresh = debounce(this.$refs.scroll.refresh, 50);
+    this.$bus.$on("itemImageLoad", () => {
+      refresh();
+    });
+  },
   methods: {
-    //事件监听
+    /**
+     * 事件监听相关的方法
+     */
     tabClick(index) {
       switch (index) {
         case 0:
@@ -89,22 +124,28 @@ export default {
           this.currentType = "sell";
           break;
       }
-      // console.log(this.currentType);
+      this.$refs.tabControl1.currentIndex = index;
+      this.$refs.tabControl2.currentIndex = index;
     },
     backClick() {
       this.$refs.scroll.scrollTo(0, 0);
     },
     contentScroll(position) {
       // 1.判断BackTop是否显示
-      // console.log(position);
       this.isShowBackTop = -position.y > 1000;
+
       // 2.决定tabControl是否吸顶(position: fixed)
-      // this.isTabFixed = -position.y > this.tabOffsetTop;
+      this.isTabFixed = -position.y > this.tabOffsetTop;
     },
     loadMore() {
       this.getHomeGoods(this.currentType);
     },
-    //网络请求
+    swiperImageLoad() {
+      this.tabOffsetTop = this.$refs.tabControl2.$el.offsetTop;
+    },
+    /**
+     * 网络请求相关的方法
+     */
     getHomeMultidata() {
       getHomeMultidata().then((res) => {
         this.banners = res.data.banner.list;
@@ -116,6 +157,7 @@ export default {
       getHomeGoods(type, page).then((res) => {
         this.goods[type].list.push(...res.data.list);
         this.goods[type].page += 1;
+
         // 完成上拉加载更多
         this.$refs.scroll.finishPullUp();
       });
